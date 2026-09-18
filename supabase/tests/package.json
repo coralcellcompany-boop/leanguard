@@ -1,0 +1,10 @@
+{
+  "name": "leanguard-backend-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test policy.test.mjs database.test.mjs"
+  },
+  "engines": { "node": ">=24" },
+  "devDependencies": { "@electric-sql/pglite": "0.3.10" }
+}

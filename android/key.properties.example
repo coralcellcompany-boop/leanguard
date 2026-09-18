@@ -1,0 +1,4 @@
+storePassword=REPLACE_LOCALLY
+keyPassword=REPLACE_LOCALLY
+keyAlias=upload
+storeFile=/absolute/path/to/leanguard-upload-keystore.jks

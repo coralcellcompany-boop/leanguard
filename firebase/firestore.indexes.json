@@ -1,0 +1,14 @@
+{
+  "indexes": [
+    { "collectionGroup": "consent_records", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "kind", "order": "ASCENDING" }, { "fieldPath": "created_at", "order": "DESCENDING" }] },
+    { "collectionGroup": "coach_messages", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "conversation_id", "order": "ASCENDING" }, { "fieldPath": "created_at", "order": "DESCENDING" }] },
+    { "collectionGroup": "reminder_preferences", "queryScope": "COLLECTION_GROUP", "fields": [{ "fieldPath": "enabled", "order": "ASCENDING" }, { "fieldPath": "delivery", "order": "ASCENDING" }] }
+  ],
+  "fieldOverrides": [
+    { "collectionGroup": "ai_cache", "fieldPath": "result", "indexes": [] },
+    { "collectionGroup": "ai_usage", "fieldPath": "reservations", "indexes": [] },
+    { "collectionGroup": "coach_messages", "fieldPath": "structured_content", "indexes": [] },
+    { "collectionGroup": "coach_messages", "fieldPath": "content", "indexes": [] },
+    { "collectionGroup": "weekly_insights", "fieldPath": "content", "indexes": [] }
+  ]
+}

@@ -1,0 +1,21 @@
+import { onRequest } from "firebase-functions/v2/https";
+import { onSchedule } from "firebase-functions/v2/scheduler";
+import { endpoint, region, OPENAI_KEY, REVENUECAT_KEY, WEBHOOK_SECRET } from "./shared/platform.js";
+import { coachHandler, approveHandler } from "./coach.js";
+import { syncHandler, webhookHandler } from "./subscriptions.js";
+import { consentHandler, saveReminderHandler, deleteReminderHandler, healthHandler } from "./records.js";
+import { exportHandler, deleteHandler } from "./privacy.js";
+import { dispatchReminderRows } from "./notifications.js";
+
+const options = { region, maxInstances: 20, concurrency: 40, memory: "256MiB" as const, timeoutSeconds: 60, cors: false };
+export const coach = onRequest({ ...options, secrets: [OPENAI_KEY] }, endpoint(coachHandler));
+export const approvePlan = onRequest(options, endpoint(approveHandler));
+export const syncEntitlement = onRequest({ ...options, secrets: [REVENUECAT_KEY] }, endpoint(syncHandler));
+export const revenuecatWebhook = onRequest({ ...options, secrets: [REVENUECAT_KEY, WEBHOOK_SECRET] }, endpoint(webhookHandler, { authenticated: false }));
+export const recordConsent = onRequest(options, endpoint(consentHandler));
+export const saveReminder = onRequest(options, endpoint(saveReminderHandler));
+export const deleteReminder = onRequest(options, endpoint(deleteReminderHandler));
+export const syncHealthActivity = onRequest(options, endpoint(healthHandler));
+export const dataExport = onRequest({ ...options, memory: "512MiB", timeoutSeconds: 300, concurrency: 1, maxInstances: 5 }, endpoint(exportHandler));
+export const deleteAccount = onRequest({ ...options, secrets: [REVENUECAT_KEY], timeoutSeconds: 300 }, endpoint(deleteHandler, { allowDeleting: true }));
+export const dispatchReminders = onSchedule({ region, schedule: "every 5 minutes", timeZone: "UTC", maxInstances: 1, timeoutSeconds: 300, retryCount: 2, memory: "256MiB" }, async () => { await dispatchReminderRows(); });

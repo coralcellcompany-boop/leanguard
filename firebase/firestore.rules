@@ -1,0 +1,140 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function owner(uid) { return request.auth != null && request.auth.uid == uid && !exists(/databases/$(database)/documents/account_deletions/$(uid)); }
+    function pro(uid) {
+      let entitlement = get(/databases/$(database)/documents/users/$(uid)/subscription_entitlements/pro).data;
+      return entitlement.is_active == true && entitlement.entitlement_id == 'pro' && entitlement.access_until_ms > request.time.toMillis();
+    }
+    function base(uid, fields) {
+      let d = request.resource.data;
+      return owner(uid) && d.keys().hasOnly(['id','user_id','created_at','updated_at'].concat(fields))
+        && d.keys().hasAll(['id','user_id','created_at']) && d.user_id == uid
+        && d.id is string && d.id.size() > 0 && d.id.size() <= 128
+        && d.created_at is string && d.created_at.size() <= 35
+        && (!('updated_at' in d) || (d.updated_at is string && d.updated_at.size() <= 35))
+        && (resource == null || (d.id == resource.data.id && d.user_id == resource.data.user_id && d.created_at == resource.data.created_at));
+    }
+    function number(d, key, min, max) { return d[key] is number && d[key] >= min && d[key] <= max; }
+    function optionalNumber(d, key, min, max) { return !(key in d) || d[key] == null || number(d,key,min,max); }
+    function short(d, key, max) { return d[key] is string && d[key].size() <= max; }
+    function optionalText(d, key, max) { return !(key in d) || d[key] == null || short(d,key,max); }
+    function optionalList(d,key,max) { return !(key in d) || (d[key] is list && d[key].size() <= max); }
+    function parent(uid, table, id) { return id is string && exists(/databases/$(database)/documents/users/$(uid)/$(table)/$(id)); }
+    function changedAdvanced() {
+      return request.resource.data.get('chest_cm',null) != resource.data.get('chest_cm',null)
+        || request.resource.data.get('hips_cm',null) != resource.data.get('hips_cm',null)
+        || request.resource.data.get('arm_cm',null) != resource.data.get('arm_cm',null)
+        || request.resource.data.get('thigh_cm',null) != resource.data.get('thigh_cm',null);
+    }
+    function noAdvanced(d) { return d.get('chest_cm',null) == null && d.get('hips_cm',null) == null && d.get('arm_cm',null) == null && d.get('thigh_cm',null) == null; }
+    match /users/{uid} {
+      allow read, write: if false;
+      match /{table}/{id} {
+        // A cancelled/expired subscription never removes access to existing data.
+        allow read: if owner(uid) && table in ['user_profiles','goal_profiles','health_connections','medication_support_preferences','strength_plans','exercises','workouts','workout_exercises','workout_sets','daily_targets','daily_activities','protein_entries','weight_entries','body_measurements','weekly_insights','coach_conversations','coach_messages','reminder_preferences','subscription_entitlements','consent_records','plan_proposals','ai_requests','device_tokens','notification_deliveries'];
+        allow delete: if owner(uid) && table in ['user_profiles','goal_profiles','health_connections','medication_support_preferences','strength_plans','exercises','workouts','workout_exercises','workout_sets','daily_targets','daily_activities','protein_entries','weight_entries','body_measurements','coach_conversations','device_tokens'];
+      }
+      match /user_profiles/{id} {
+        allow create, update: if id == uid && base(uid,['display_name','units','time_zone','onboarding_completed','analytics_enabled','crash_reporting_enabled','coaching_tone','avatar_path'])
+          && short(request.resource.data,'display_name',80) && request.resource.data.units in ['metric','imperial']
+          && short(request.resource.data,'time_zone',100) && request.resource.data.onboarding_completed is bool
+          && request.resource.data.get('analytics_enabled',false) is bool && request.resource.data.get('crash_reporting_enabled',false) is bool
+          && optionalText(request.resource.data,'coaching_tone',40) && optionalText(request.resource.data,'avatar_path',500);
+      }
+      match /goal_profiles/{id} {
+        allow create, update: if id == uid && base(uid,['goals','goal','target_weight_kg','workouts_per_week','protein_target_g','step_target','equipment','dietary_preferences','allergies','limitations','exercise_preferences','session_minutes','training_days'])
+          && request.resource.data.goal in ['lose_weight','build_strength','stay_consistent']
+          && optionalNumber(request.resource.data,'target_weight_kg',20,500) && number(request.resource.data,'workouts_per_week',1,7)
+          && number(request.resource.data,'protein_target_g',20,400) && number(request.resource.data,'step_target',500,50000)
+          && optionalList(request.resource.data,'goals',10) && optionalList(request.resource.data,'equipment',30)
+          && optionalList(request.resource.data,'dietary_preferences',30) && optionalList(request.resource.data,'allergies',30)
+          && optionalList(request.resource.data,'limitations',30) && optionalList(request.resource.data,'exercise_preferences',30)
+          && optionalNumber(request.resource.data,'session_minutes',10,180)
+          && (!('training_days' in request.resource.data) || (request.resource.data.training_days is list && request.resource.data.training_days.size() <= 7 && request.resource.data.training_days.hasOnly([1,2,3,4,5,6,7])));
+      }
+      match /health_connections/{id} {
+        allow create, update: if base(uid,['provider','status','permissions','last_synced_at']) && id == request.resource.data.provider
+          && id in ['apple_health','health_connect'] && request.resource.data.status in ['connected','disconnected','denied','unavailable']
+          && optionalList(request.resource.data,'permissions',10) && optionalText(request.resource.data,'last_synced_at',35);
+      }
+      match /medication_support_preferences/{id} {
+        allow create, update: if id == uid && base(uid,['enabled','clinician_supervised','appetite_level','hydration_reminders','check_ins_enabled'])
+          && request.resource.data.enabled is bool && request.resource.data.clinician_supervised is bool
+          && (!request.resource.data.enabled || request.resource.data.clinician_supervised)
+          && request.resource.data.appetite_level in ['normal','low','very_low'] && request.resource.data.get('hydration_reminders',false) is bool && request.resource.data.get('check_ins_enabled',false) is bool;
+      }
+      match /strength_plans/{id} {
+        allow create, update: if base(uid,['name','description','is_active','version','source','schedule']) && id == request.resource.data.id
+          && short(request.resource.data,'name',120) && short(request.resource.data,'description',2000)
+          && request.resource.data.is_active is bool && request.resource.data.version is int && request.resource.data.version > 0
+          && request.resource.data.source in ['starter','manual'] && optionalList(request.resource.data,'schedule',7)
+          && (request.resource.data.source == 'starter' || pro(uid) || (resource != null && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['is_active','updated_at'])));
+      }
+      match /exercises/{id} {
+        allow create, update: if base(uid,['name','muscle_group','equipment','instructions','image_url']) && id == request.resource.data.id
+          && short(request.resource.data,'name',120) && short(request.resource.data,'muscle_group',60) && short(request.resource.data,'equipment',100)
+          && optionalList(request.resource.data,'instructions',30) && optionalText(request.resource.data,'image_url',2000);
+      }
+      match /workouts/{id} {
+        allow create, update: if base(uid,['plan_id','name','status','scheduled_date','started_at','completed_at','duration_seconds','notes','health_exported_at']) && id == request.resource.data.id
+          && (request.resource.data.get('plan_id',null) == null || parent(uid,'strength_plans',request.resource.data.plan_id))
+          && short(request.resource.data,'name',120) && request.resource.data.status in ['planned','in_progress','completed','skipped']
+          && optionalNumber(request.resource.data,'duration_seconds',0,86400) && optionalText(request.resource.data,'notes',2000)
+          && optionalText(request.resource.data,'scheduled_date',10) && optionalText(request.resource.data,'started_at',35) && optionalText(request.resource.data,'completed_at',35) && optionalText(request.resource.data,'health_exported_at',35);
+      }
+      match /workout_exercises/{id} {
+        allow create, update: if base(uid,['workout_id','exercise_id','position','target_sets','target_reps','target_weight_kg','rest_seconds','status']) && id == request.resource.data.id
+          && parent(uid,'workouts',request.resource.data.workout_id) && parent(uid,'exercises',request.resource.data.exercise_id)
+          && number(request.resource.data,'position',0,100) && number(request.resource.data,'target_sets',1,20)
+          && number(request.resource.data,'target_reps',1,100) && number(request.resource.data,'target_weight_kg',0,1000)
+          && number(request.resource.data,'rest_seconds',0,600) && request.resource.data.status in ['planned','completed','skipped'];
+      }
+      match /workout_sets/{id} {
+        allow create, update: if base(uid,['workout_exercise_id','set_number','reps','weight_kg','completed','completed_at','rpe'])
+          && parent(uid,'workout_exercises',request.resource.data.workout_exercise_id)
+          && request.resource.data.set_number is int && number(request.resource.data,'set_number',1,100)
+          && id == request.resource.data.workout_exercise_id + '_' + string(request.resource.data.set_number)
+          && number(request.resource.data,'reps',0,200) && number(request.resource.data,'weight_kg',0,1000)
+          && request.resource.data.completed is bool && optionalText(request.resource.data,'completed_at',35) && optionalNumber(request.resource.data,'rpe',1,10);
+      }
+      match /daily_targets/{id} {
+        allow create, update: if base(uid,['date','steps','protein_g']) && id == request.resource.data.date && id.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+          && number(request.resource.data,'steps',500,50000) && number(request.resource.data,'protein_g',20,400);
+      }
+      match /daily_activities/{id} {
+        allow create, update: if base(uid,['date','steps','active_energy_kcal','readiness_score','energy_level','source']) && id == request.resource.data.date && id.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+          && request.resource.data.source == 'manual' && number(request.resource.data,'steps',0,200000)
+          && optionalNumber(request.resource.data,'active_energy_kcal',0,50000) && optionalNumber(request.resource.data,'readiness_score',0,100) && optionalNumber(request.resource.data,'energy_level',1,5);
+      }
+      match /protein_entries/{id} {
+        allow create, update: if base(uid,['recorded_at','name','protein_g','meal_type']) && id == request.resource.data.id
+          && short(request.resource.data,'recorded_at',35) && short(request.resource.data,'name',200)
+          && number(request.resource.data,'protein_g',0.1,300) && request.resource.data.meal_type in ['breakfast','lunch','dinner','snack'];
+      }
+      match /weight_entries/{id} {
+        allow create, update: if base(uid,['recorded_at','weight_kg','source','external_id']) && id == request.resource.data.id
+          && short(request.resource.data,'recorded_at',35) && number(request.resource.data,'weight_kg',20,500)
+          && request.resource.data.source == 'manual' && request.resource.data.get('external_id',null) == null;
+      }
+      match /body_measurements/{id} {
+        function valid() { let d = request.resource.data; return base(uid,['recorded_at','waist_cm','chest_cm','hips_cm','arm_cm','thigh_cm']) && id == d.id
+          && short(d,'recorded_at',35) && optionalNumber(d,'waist_cm',20,300) && optionalNumber(d,'chest_cm',20,300)
+          && optionalNumber(d,'hips_cm',20,300) && optionalNumber(d,'arm_cm',10,100) && optionalNumber(d,'thigh_cm',10,150)
+          && (d.get('waist_cm',null) != null || !noAdvanced(d)); }
+        allow create: if valid() && (noAdvanced(request.resource.data) || pro(uid));
+        allow update: if valid() && (!changedAdvanced() || noAdvanced(request.resource.data) || pro(uid));
+      }
+      match /coach_conversations/{id} {
+        allow create, update: if base(uid,['title']) && id == request.resource.data.id && short(request.resource.data,'title',120);
+      }
+      match /device_tokens/{id} {
+        allow create, update: if base(uid,['token','platform']) && id == request.resource.data.id
+          && short(request.resource.data,'token',4096) && request.resource.data.token.size() >= 20 && request.resource.data.platform in ['ios','android'];
+      }
+    }
+    // Server-only entitlements, consent, quotas, reminders, AI results and events.
+    // Admin SDK bypasses Rules; every handler authenticates and chooses uid itself.
+    match /{document=**} { allow read, write: if false; }
+  }
+}

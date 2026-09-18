@@ -1,0 +1,5 @@
+.env
+.env.local
+.temp/
+.branches/
+node_modules/
