@@ -1,0 +1,26 @@
+[Unit]
+Description=LeanGuard reminder and retention worker
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=leanguard
+Group=leanguard
+WorkingDirectory=/opt/leanguard/backend
+EnvironmentFile=/etc/leanguard/backend.env
+ExecStart=/usr/bin/node lib/worker.js
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=35
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/leanguard/exports
+MemoryMax=512M
+TasksMax=100
+
+[Install]
+WantedBy=multi-user.target

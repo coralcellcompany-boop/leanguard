@@ -1,0 +1,144 @@
+name: leanguard
+
+x-api-environment: &api-environment
+  NODE_ENV: production
+  HOST: 0.0.0.0
+  PORT: 8080
+  TRUST_PROXY_HOPS: 1
+  FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-leanguard-a58ff}
+  GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/firebase_admin
+  DATABASE_URL_FILE: /run/secrets/database_url
+  PUBLIC_BASE_URL: https://${API_DOMAIN:?Set API_DOMAIN in .env}
+  EXPORT_DIRECTORY: /app/data/exports
+  EXPORT_SIGNING_SECRET_FILE: /run/secrets/export_signing_secret
+  OPENAI_API_KEY_FILE: /run/secrets/openai_api_key
+  REVENUECAT_SECRET_KEY_FILE: /run/secrets/revenuecat_secret_key
+  REVENUECAT_WEBHOOK_SECRET_FILE: /run/secrets/revenuecat_webhook_secret
+  OPENAI_COACH_MODEL: ${OPENAI_COACH_MODEL:-gpt-4.1-mini}
+  OPENAI_REASONING_MODEL: ${OPENAI_REASONING_MODEL:-gpt-4.1}
+  ALLOW_SANDBOX_ENTITLEMENTS: ${ALLOW_SANDBOX_ENTITLEMENTS:-false}
+  ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
+
+x-api-secrets: &api-secrets
+  - database_url
+  - firebase_admin
+  - export_signing_secret
+  - openai_api_key
+  - revenuecat_secret_key
+  - revenuecat_webhook_secret
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: leanguard
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets: [postgres_password]
+    volumes: [postgres_data:/var/lib/postgresql/data]
+    networks: [database]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U postgres -d leanguard"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    mem_limit: 1g
+    pids_limit: 200
+    logging: {driver: json-file, options: {max-size: 10m, max-file: '3'}}
+
+  migrate:
+    image: leanguard-api:local
+    build: .
+    command: [sh, -c, "node scripts/migrate.mjs && node scripts/provision-runtime.mjs"]
+    environment:
+      MIGRATION_DATABASE_URL_FILE: /run/secrets/migration_database_url
+      DATABASE_RUNTIME_PASSWORD_FILE: /run/secrets/database_runtime_password
+    secrets: [migration_database_url, database_runtime_password]
+    networks: [database]
+    depends_on: {db: {condition: service_healthy}}
+    read_only: true
+    tmpfs: [/tmp:size=32m,mode=1777]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    healthcheck: {disable: true}
+    restart: 'no'
+
+  api:
+    image: leanguard-api:local
+    build: .
+    restart: unless-stopped
+    init: true
+    environment: *api-environment
+    secrets: *api-secrets
+    volumes: [exports:/app/data/exports]
+    networks: [database, edge]
+    depends_on: {migrate: {condition: service_completed_successfully}}
+    read_only: true
+    tmpfs: [/tmp:size=64m,mode=1777]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 768m
+    pids_limit: 100
+    stop_grace_period: 35s
+    logging: {driver: json-file, options: {max-size: 10m, max-file: '3'}}
+
+  worker:
+    image: leanguard-api:local
+    restart: unless-stopped
+    init: true
+    command: [node, lib/worker.js]
+    environment: *api-environment
+    secrets: *api-secrets
+    volumes: [exports:/app/data/exports]
+    networks: [database, edge]
+    depends_on: {migrate: {condition: service_completed_successfully}}
+    read_only: true
+    tmpfs: [/tmp:size=64m,mode=1777]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 512m
+    pids_limit: 100
+    stop_grace_period: 35s
+    healthcheck:
+      test: [CMD, node, -e, "const fs=require('node:fs');try{process.exit(Date.now()-fs.statSync('/tmp/leanguard-worker-heartbeat').mtimeMs<600000?0:1)}catch{process.exit(1)}"]
+      interval: 60s
+      start_period: 90s
+      timeout: 5s
+      retries: 3
+    logging: {driver: json-file, options: {max-size: 10m, max-file: '3'}}
+
+  caddy:
+    build: {context: deploy, dockerfile: Caddy.Dockerfile}
+    restart: unless-stopped
+    environment: {API_DOMAIN: '${API_DOMAIN}', ACME_EMAIL: '${ACME_EMAIL}'}
+    ports: ['80:8080', '443:8443', '443:8443/udp']
+    volumes: ['./deploy/Caddyfile:/etc/caddy/Caddyfile:ro', 'caddy_data:/data', 'caddy_config:/config']
+    networks: [edge]
+    depends_on: {api: {condition: service_healthy}}
+    read_only: true
+    tmpfs: [/tmp:size=32m,mode=1777]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 256m
+    pids_limit: 100
+    logging: {driver: json-file, options: {max-size: 10m, max-file: '3'}}
+
+networks:
+  database: {internal: true}
+  edge: {}
+volumes:
+  postgres_data: {}
+  exports: {}
+  caddy_data: {}
+  caddy_config: {}
+secrets:
+  postgres_password: {file: ./secrets/postgres_password}
+  migration_database_url: {file: ./secrets/migration_database_url}
+  database_runtime_password: {file: ./secrets/database_runtime_password}
+  database_url: {file: ./secrets/database_url}
+  firebase_admin: {file: ./secrets/firebase_admin.json}
+  export_signing_secret: {file: ./secrets/export_signing_secret}
+  openai_api_key: {file: ./secrets/openai_api_key}
+  revenuecat_secret_key: {file: ./secrets/revenuecat_secret_key}
+  revenuecat_webhook_secret: {file: ./secrets/revenuecat_webhook_secret}

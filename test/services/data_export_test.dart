@@ -5,7 +5,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
-import 'package:leanguard/core/data/firebase_repository.dart';
+import 'package:leanguard/core/data/api_repository.dart';
 import 'package:leanguard/core/data/repository.dart';
 import 'package:leanguard/core/services/data_export_service.dart';
 import 'package:share_plus/share_plus.dart';
@@ -35,9 +35,9 @@ class ExportRepository extends LeanRepository {
 }
 
 void main() {
-  const bucket = 'leanguard-test.firebasestorage.app';
+  const backend = 'https://api.leanguard.test';
   const url =
-      'https://storage.googleapis.com/$bucket/exports/account-a/data.json?GoogleAccessId=test&Expires=2000000000&Signature=test-signature';
+      '$backend/v1/exports/account-a/12345678-1234-1234-1234-123456789abc.json?expires=9999999999999&signature=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
   late Directory temp;
   late ExportRepository repository;
   late List<ShareParams> shared;
@@ -55,7 +55,7 @@ void main() {
   DataExportService service({http.Client? client, Duration? timeout}) =>
       DataExportService(
         repository,
-        storageBucket: bucket,
+        backendBaseUrl: backend,
         temporaryDirectory: () async => temp,
         httpClientFactory: () =>
             client ?? MockClient((_) async => http.Response('', 500)),
@@ -141,9 +141,9 @@ void main() {
       });
       for (final unsafe in [
         url.replaceFirst('https:', 'http:'),
-        url.replaceFirst('storage.googleapis.com', 'example.com'),
+        url.replaceFirst('api.leanguard.test', 'example.com'),
         url.replaceFirst('account-a/', 'account-b/'),
-        url.replaceFirst(bucket, 'another-bucket'),
+        url.replaceFirst('/v1/', '/v2/'),
         url.split('?').first,
         '$url#fragment',
       ]) {
@@ -269,7 +269,7 @@ void main() {
         isA<StateError>().having(
           (error) => error.toString(),
           'message',
-          isNot(contains('Signature')),
+          isNot(contains('signature')),
         ),
       ),
     );
@@ -327,13 +327,13 @@ void main() {
       'deleteAccount',
     ]) {
       expect(
-        FirebaseRepositoryRemote.requestTimeout(endpoint),
+        ApiRepositoryRemote.requestTimeout(endpoint),
         const Duration(seconds: 300),
       );
     }
     for (final endpoint in ['coach', 'sync-health-activity', 'approve-plan']) {
       expect(
-        FirebaseRepositoryRemote.requestTimeout(endpoint),
+        ApiRepositoryRemote.requestTimeout(endpoint),
         const Duration(seconds: 35),
       );
     }

@@ -1,14 +1,13 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:leanguard/core/data/firebase_repository.dart';
+import 'package:leanguard/core/data/api_repository.dart';
 import 'package:leanguard/core/data/repository.dart';
 
 void main() {
-  group('Firestore document identity', () {
+  group('API record identity', () {
     test('singleton paths use the account owner rather than local row IDs', () {
       for (final table in LeanRepository.singletons) {
         expect(
-          FirebaseRepositoryRemote.documentId(table, {
+          ApiRepositoryRemote.documentId(table, {
             'id': 'local-profile-id',
             'user_id': 'account-a',
           }),
@@ -16,7 +15,7 @@ void main() {
         );
       }
       expect(
-        FirebaseRepositoryRemote.documentId('subscription_entitlements', {
+        ApiRepositoryRemote.documentId('subscription_entitlements', {
           'id': 'event-id',
           'user_id': 'account-a',
         }),
@@ -34,18 +33,15 @@ void main() {
             'steps': 7000,
           };
           final second = {...first, 'id': 'second-device-row', 'steps': 7100};
+          expect(ApiRepositoryRemote.documentId(table, first), '2026-09-18');
           expect(
-            FirebaseRepositoryRemote.documentId(table, first),
-            '2026-09-18',
-          );
-          expect(
-            FirebaseRepositoryRemote.documentId(table, second),
-            FirebaseRepositoryRemote.documentId(table, first),
+            ApiRepositoryRemote.documentId(table, second),
+            ApiRepositoryRemote.documentId(table, first),
           );
           expect(first['id'], 'first-device-row');
         }
         expect(
-          FirebaseRepositoryRemote.documentId('health_connections', {
+          ApiRepositoryRemote.documentId('health_connections', {
             'id': 'connection-id',
             'provider': 'health_connect',
           }),
@@ -63,18 +59,18 @@ void main() {
           'set_number': 2,
         };
         expect(
-          FirebaseRepositoryRemote.documentId('workout_sets', row),
+          ApiRepositoryRemote.documentId('workout_sets', row),
           'exercise-in-workout_2',
         );
         expect(
-          FirebaseRepositoryRemote.documentId('workout_sets', {
+          ApiRepositoryRemote.documentId('workout_sets', {
             ...row,
             'id': 'retry-set-id',
           }),
           'exercise-in-workout_2',
         );
         expect(
-          FirebaseRepositoryRemote.documentId('workout_sets', {
+          ApiRepositoryRemote.documentId('workout_sets', {
             ...row,
             'set_number': 3,
           }),
@@ -89,21 +85,21 @@ void main() {
         'source': 'apple_health',
         'external_id': 'weight/sample:1',
       };
-      final id = FirebaseRepositoryRemote.documentId('weight_entries', row);
+      final id = ApiRepositoryRemote.documentId('weight_entries', row);
       expect(
         id,
         'ddb5635417ad40a98e053708ff96f8a3ae3ac2b7527747759b98efa601bfdd53',
       );
       expect(id, matches(RegExp(r'^[a-f0-9]{64}$')));
       expect(
-        FirebaseRepositoryRemote.documentId('weight_entries', {
+        ApiRepositoryRemote.documentId('weight_entries', {
           ...row,
           'id': 'retry-local-id',
         }),
         id,
       );
       expect(
-        FirebaseRepositoryRemote.documentId('weight_entries', {
+        ApiRepositoryRemote.documentId('weight_entries', {
           ...row,
           'source': 'health_connect',
         }),
@@ -122,12 +118,12 @@ void main() {
         'coach_conversations',
       ]) {
         expect(
-          FirebaseRepositoryRemote.documentId(table, {'id': '$table-id'}),
+          ApiRepositoryRemote.documentId(table, {'id': '$table-id'}),
           '$table-id',
         );
       }
       expect(
-        FirebaseRepositoryRemote.documentId('weight_entries', {
+        ApiRepositoryRemote.documentId('weight_entries', {
           'id': 'manual-weight',
           'source': 'manual',
           'external_id': null,
@@ -137,41 +133,34 @@ void main() {
     });
   });
 
-  group('Firestore value normalization', () {
-    test(
-      'nested timestamps become UTC strings without losing scalar values',
-      () {
-        final instant = DateTime.utc(2026, 9, 18, 8, 35, 12, 123, 456);
-        final timestamp = Timestamp.fromDate(instant);
-        final input = <Object, Object?>{
-          'created_at': timestamp,
-          'nested': [
-            {'at': timestamp, 'steps': 8000, 'weight': 84.2},
-            null,
-            true,
-            '2026-09-18',
-          ],
-          7: false,
-        };
-        final result = FirebaseRepositoryRemote.normalize(input);
-        expect(result, {
-          'created_at': '2026-09-18T08:35:12.123456Z',
-          'nested': [
-            {
-              'at': '2026-09-18T08:35:12.123456Z',
-              'steps': 8000,
-              'weight': 84.2,
-            },
-            null,
-            true,
-            '2026-09-18',
-          ],
-          '7': false,
-        });
-        expect(input['created_at'], same(timestamp));
-        expect((input['nested'] as List).first['at'], same(timestamp));
-      },
-    );
+  group('JSON value normalization', () {
+    test('UTC JSON timestamps remain strings without losing scalar values', () {
+      final instant = DateTime.utc(2026, 9, 18, 8, 35, 12, 123, 456);
+      final timestamp = instant.toUtc().toIso8601String();
+      final input = <Object, Object?>{
+        'created_at': timestamp,
+        'nested': [
+          {'at': timestamp, 'steps': 8000, 'weight': 84.2},
+          null,
+          true,
+          '2026-09-18',
+        ],
+        7: false,
+      };
+      final result = ApiRepositoryRemote.normalize(input);
+      expect(result, {
+        'created_at': '2026-09-18T08:35:12.123456Z',
+        'nested': [
+          {'at': '2026-09-18T08:35:12.123456Z', 'steps': 8000, 'weight': 84.2},
+          null,
+          true,
+          '2026-09-18',
+        ],
+        '7': false,
+      });
+      expect(input['created_at'], same(timestamp));
+      expect((input['nested'] as List).first['at'], same(timestamp));
+    });
 
     test(
       'normalization preserves stored row identity for natural-key paths',
@@ -181,19 +170,19 @@ void main() {
           'user_id': 'account-a',
           'date': '2026-09-18',
         };
-        final normalized = Json.from(FirebaseRepositoryRemote.normalize(row));
+        final normalized = Json.from(ApiRepositoryRemote.normalize(row));
         expect(normalized['id'], 'stable-local-id');
         expect(
-          FirebaseRepositoryRemote.documentId('daily_activities', normalized),
+          ApiRepositoryRemote.documentId('daily_activities', normalized),
           '2026-09-18',
         );
-        expect(FirebaseRepositoryRemote.normalize(null), isNull);
-        expect(FirebaseRepositoryRemote.normalize([]), isEmpty);
+        expect(ApiRepositoryRemote.normalize(null), isNull);
+        expect(ApiRepositoryRemote.normalize([]), isEmpty);
       },
     );
   });
 
-  test('app operation aliases resolve to deployed HTTPS function names', () {
+  test('app operation aliases resolve to standalone API endpoint names', () {
     const aliases = {
       'approve-plan': 'approvePlan',
       'sync-entitlement': 'syncEntitlement',
@@ -202,7 +191,7 @@ void main() {
       'sync-health-activity': 'syncHealthActivity',
     };
     for (final alias in aliases.entries) {
-      expect(FirebaseRepositoryRemote.endpoint(alias.key), alias.value);
+      expect(ApiRepositoryRemote.endpoint(alias.key), alias.value);
     }
     for (final name in [
       'coach',
@@ -210,7 +199,7 @@ void main() {
       'deleteReminder',
       'recordConsent',
     ]) {
-      expect(FirebaseRepositoryRemote.endpoint(name), name);
+      expect(ApiRepositoryRemote.endpoint(name), name);
     }
   });
 
@@ -219,12 +208,12 @@ void main() {
     () {
       const error = BackendException(
         403,
-        'app_check_required',
-        'App verification failed.',
+        'permission_denied',
+        'Permission denied.',
       );
       expect(error.status, 403);
-      expect(error.code, 'app_check_required');
-      expect(error.toString(), 'App verification failed.');
+      expect(error.code, 'permission_denied');
+      expect(error.toString(), 'Permission denied.');
     },
   );
 }

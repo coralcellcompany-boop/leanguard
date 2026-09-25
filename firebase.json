@@ -1,6 +1,3 @@
 {
-  "functions": [{ "source": "firebase/functions", "codebase": "leanguard", "runtime": "nodejs22", "predeploy": ["npm --prefix \"$RESOURCE_DIR\" run build"], "ignore": ["node_modules", "test", ".env.example", ".secret.local", "*-debug.log"] }],
-  "firestore": { "rules": "firebase/firestore.rules", "indexes": "firebase/firestore.indexes.json", "location": "europe-west1" },
-  "storage": { "rules": "firebase/storage.rules" },
-  "emulators": { "auth": { "port": 9099 }, "functions": { "port": 5001 }, "firestore": { "port": 8080 }, "storage": { "port": 9199 }, "ui": { "enabled": true, "port": 4000 }, "singleProjectMode": true }
+  "emulators": { "auth": { "port": 9099 }, "ui": { "enabled": false }, "singleProjectMode": true }
 }

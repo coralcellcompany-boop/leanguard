@@ -2,18 +2,51 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 
 abstract final class AppConfig {
+  static const backendBaseUrl = String.fromEnvironment('BACKEND_BASE_URL');
+  static const allowLocalBackendHttp = bool.fromEnvironment(
+    'BACKEND_ALLOW_HTTP_LOCAL',
+  );
+
+  static Uri parseBackendUri(
+    String value, {
+    bool allowLocalHttp = false,
+    bool releaseMode = true,
+  }) {
+    if (value.trim().isEmpty) {
+      throw StateError(
+        'BACKEND_BASE_URL is not configured. Set the HTTPS address of your LeanGuard server.',
+      );
+    }
+    final uri = Uri.tryParse(value.trim());
+    if (uri == null ||
+        !uri.hasAuthority ||
+        uri.host.isEmpty ||
+        uri.userInfo.isNotEmpty ||
+        uri.hasQuery ||
+        uri.hasFragment ||
+        (uri.path.isNotEmpty && uri.path != '/')) {
+      throw const FormatException(
+        'BACKEND_BASE_URL must be a server origin without a path, credentials, query or fragment.',
+      );
+    }
+    final localHttp =
+        !releaseMode &&
+        allowLocalHttp &&
+        uri.scheme == 'http' &&
+        const {'localhost', '127.0.0.1', '::1', '10.0.2.2'}.contains(uri.host);
+    if (uri.scheme != 'https' && !localHttp) {
+      throw const FormatException(
+        'Use HTTPS for BACKEND_BASE_URL. Local HTTP requires an explicit debug-only opt-in.',
+      );
+    }
+    return uri.replace(path: '');
+  }
+
   static const firebaseProjectId = String.fromEnvironment(
     'FIREBASE_PROJECT_ID',
   );
-  static const firebaseRegion = String.fromEnvironment(
-    'FIREBASE_REGION',
-    defaultValue: 'europe-west1',
-  );
   static const firebaseSenderId = String.fromEnvironment(
     'FIREBASE_MESSAGING_SENDER_ID',
-  );
-  static const firebaseStorageBucket = String.fromEnvironment(
-    'FIREBASE_STORAGE_BUCKET',
   );
   static const useEmulators = bool.fromEnvironment('FIREBASE_USE_EMULATORS');
   static const emulatorHost = String.fromEnvironment(
@@ -47,9 +80,6 @@ abstract final class AppConfig {
       appId: appId,
       messagingSenderId: firebaseSenderId,
       projectId: firebaseProjectId,
-      storageBucket: firebaseStorageBucket.isEmpty
-          ? null
-          : firebaseStorageBucket,
       iosBundleId: apple ? 'com.coralcell.leanguard' : null,
     );
   }

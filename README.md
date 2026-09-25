@@ -1,64 +1,62 @@
 # LeanGuard
 
-**Lose weight. Keep your muscle.** Native Flutter / Dart app for iOS and Android, rebuilt from the supplied interactive prototype. No WebView.
+**Lose weight. Keep your muscle.** Native Flutter/Dart application for iOS and Android, rebuilt from all screens in the supplied interactive prototype. No WebView.
 
 ## Run
 
-Requires Flutter 3.38.9 / Dart 3.10.8 or a compatible Flutter 3.x release, Xcode for iOS, and Android SDK/JDK 17 for Android. Firebase backend development uses Node 22 and Java 21 for local emulators.
+Requires Flutter 3.38.9 / Dart 3.10.8 or a compatible Flutter 3.x release, Xcode for iOS, and Android SDK/JDK 17. The standalone backend uses Node 22 and PostgreSQL 17.
 
 ```sh
 flutter pub get
 flutter run
 ```
 
-An unconfigured build opens Welcome. **Explore a sample plan** starts an explicitly labeled local preview with real manual logging, validation and persistence; it never simulates a successful sign-in, AI request, health connection or purchase.
+An unconfigured build opens Welcome. **Explore a sample plan** starts a labeled local preview with manual logging, validation and encrypted persistence. It never simulates successful sign-in, coaching, health access or purchases.
 
-For connected operation:
+For connected operation, preserve existing real SDK files and configure public settings:
 
 ```sh
 cp -n dart_defines.example.json dart_defines.json
-# Fill public client configuration. Never put Admin/OpenAI/server keys here.
+# Fill BACKEND_BASE_URL, Firebase public app config and RevenueCat public SDK keys.
 python3 tool/configure_firebase_native.py dart_defines.json
 flutter run --dart-define-from-file=dart_defines.json
 ```
 
-Both platforms use **`com.coralcell.leanguard`**. Matching Firebase app registrations and private local SDK/Dart configuration are present. The default Firestore database, rules/indexes and email/password sign-in are configured; live Functions and Storage still require billing and the setup below.
+Both application identifiers are **com.coralcell.leanguard**. Firebase project **leanguard-a58ff** provides **Authentication and FCM only**. The active application backend is **Node/Express + PostgreSQL on a Linux VPS**, with Docker Compose, private export storage, a separate worker and Caddy HTTPS. Follow [BACKEND_VPS.md](docs/BACKEND_VPS.md), [POSTGRES_SCHEMA.md](docs/POSTGRES_SCHEMA.md), [FIREBASE_SETUP.md](docs/FIREBASE_SETUP.md) and [MOBILE_SETUP.md](docs/MOBILE_SETUP.md). No VPS/domain was supplied or deployed. OpenAI, RevenueCat secret keys, database credentials and Firebase Admin credentials belong only in protected server secret files.
 
-The active backend is **Firebase**, targeting project **`leanguard-a58ff`** and Functions/Firestore region **`europe-west1`**. Configure and deploy it using [FIREBASE_SETUP.md](docs/FIREBASE_SETUP.md), then complete the iOS/Android provider setup in [MOBILE_SETUP.md](docs/MOBILE_SETUP.md). These cover Auth, Firestore/Storage Security Rules, App Check, native Google/Apple sign-in, permissions, background refresh, FCM/APNs, RevenueCat products/webhooks, signing and store testing. Public client settings are in `dart_defines.example.json`; public server parameters are in `firebase/functions/.env.example`. Server secrets belong in Google Secret Manager.
+The landing page source is in `landing/`, with a [private preview](https://leanguard-coralcell.mhamoudabaplus.chatgpt.site). To prepare the allowlisted server/landing/docs package without credentials, run `python3 tool/package_server.py`; it creates `build/leanguard-server.tar.gz`.
 
 ## Implementation
 
-- Native welcome, authentication/recovery, onboarding and all 14 prototype screens, plus validated logging forms, exercise details, workout summary, permissions, reports, preferences and privacy/deletion.
-- Riverpod application state, GoRouter navigation, immutable domain entities, pure business policies, feature presentation modules and injected repository/service boundaries.
-- Firebase Authentication, Firestore and private Storage, with owner-only Security Rules, same-owner parent references, transactional quotas, append-only consent and server-owned entitlement/AI records.
-- Native Firebase Auth credential persistence and an encrypted per-account Keychain/Keystore cache; idempotent queued writes, offline recovery and account-switch isolation.
-- Real RevenueCat purchase, eligibility, restoration and subscription management. Pro is never granted by a button or client preference.
-- Server-only Responses API through authenticated Firebase HTTPS Functions, structured JSON, prompt versioning, snapshot caching, timeouts, evidence checking, conservative proposal bounds, explicit plan approval and deterministic medical escalation.
-- Native HealthKit/Health Connect with partial-denial handling, original-timestamp weight imports, optional Pro background work, and explicit workout sharing.
-- Local reminders and Cloud Scheduler/FCM delivery, timezone/quiet-hour rules, privacy-safe notifications, opt-in telemetry, raw data export and recent-auth account deletion.
+- All 14 native prototype screens plus authentication/recovery, permissions, validated logging forms, exercise details, workout completion, reports, personalization and account privacy flows.
+- Riverpod state, GoRouter navigation, feature presentation/domain modules, injectable repositories/services and an encrypted per-account Keychain/Keystore cache with offline write replay.
+- Verified Firebase ID tokens, PostgreSQL RLS, owner-bound references, strict client field validation, transactional quotas and server-owned consent/AI/entitlement records.
+- RevenueCat offerings, trial eligibility, purchase, restoration, billing-state handling and subscription management. RevenueCat verification remains the entitlement authority.
+- Server-only OpenAI Responses API with structured output, prompt versioning, data-snapshot caching, timeouts, safety rules, deterministic fallbacks and explicit approval of bounded plan adjustments.
+- HealthKit/Health Connect with partial permission denial, original-timestamp imports, optional Pro background refresh and deliberate workout export.
+- Native local reminders plus a standalone scheduled FCM worker; privacy-safe content, quiet hours, opt-in telemetry, raw export and recent-auth account deletion.
 
-The exact product policy is [FEATURE_MATRIX.md](FEATURE_MATRIX.md). Existing records remain readable after subscription expiration; raw account export is available to all plans. App metrics are derived from logs and never represent a diagnosis or direct muscle-mass measurement.
+[FEATURE_MATRIX.md](FEATURE_MATRIX.md) defines the exact product tiers. Existing records and raw account export remain accessible after Pro expires. Logged trends and readiness are product heuristics, not diagnoses or direct muscle-mass measurements.
 
 ## Verification
 
 ```sh
 flutter analyze
 flutter test
-npm ci --prefix firebase/functions
-npm --prefix firebase/functions test
-npm --prefix firebase/functions run test:emulator
-npm --prefix firebase/functions run test:http
+npm ci --prefix backend
+npm --prefix backend test
+# Provision an isolated *_test database and set TEST_DATABASE_URL / TEST_ADMIN_DATABASE_URL.
+npm --prefix backend run test:database
+npm --prefix backend run test:http
 flutter test integration_test/app_flow_test.dart -d <device-id>
 flutter build apk --debug
 flutter build ios --simulator
 ```
 
-Firebase scripts compile the TypeScript functions, run policy/provider unit tests, exercise Auth/Firestore/Storage emulators, and run authenticated HTTPS smoke tests against the Functions emulator. The runner always uses isolated project `demo-leanguard`, strips unrelated credentials from its environment, and uses placeholder provider secrets. These tests do not contact live paid AI or store providers. CI runs Flutter analysis/tests/Android debug build and these Firebase suites without production credentials.
+Backend unit tests cover policy, provider failures, exports, worker behavior, HTTP boundaries and validation. Database tests use a real restricted PostgreSQL login and test RLS, constraints and concurrent transactions. HTTP integration tests use real Express requests, PostgreSQL and Firebase Auth emulator under isolated project demo-leanguard. No live paid AI or store provider is called. CI runs these checks and builds/smoke-tests the non-root Docker runtime.
 
-`test/screens_test.dart` and `test/insight_screens_test.dart` can regenerate the 18 native visual-review PNGs under `build/ui-audit` (see [DESIGN_AUDIT.md](docs/DESIGN_AUDIT.md)). The earlier `supabase/` SQL/Edge Function implementation is an **optional migration reference**, not the active runtime or default CI backend; its separate instructions are in [BACKEND.md](docs/BACKEND.md).
-
-See [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) for the implementation sequence and [VALIDATION.md](docs/VALIDATION.md) for executed checks and release prerequisites.
+[DESIGN_AUDIT.md](docs/DESIGN_AUDIT.md) records native visual review and commands to regenerate 18 screen captures. [VALIDATION.md](docs/VALIDATION.md) distinguishes executed tests from remaining release work. The previous firebase/functions and supabase implementations are archived migration references, not active deployment or default CI targets.
 
 ## Release boundary
 
-This repository supplies application and backend code. A project ID or successful emulator test does not establish a deployed production service. Firebase provisioning/billing, Auth providers, App Check, server secrets and Functions deployment must be completed for connected operation. RevenueCat offerings and both stores' products, APNs/FCM delivery, signed release builds and physical-device acceptance require the owner's accounts. Simulator/mock-backed tests do not verify live billing, real health sharing, push delivery or store approval. Replace policy URLs and complete the final privacy/legal/medical-content review before release. See [VALIDATION.md](docs/VALIDATION.md) for the distinction between executed checks and remaining acceptance work.
+The native app and backend are implemented and locally verified; a live production service still needs your VPS/domain, server credentials, real authentication-provider setup, APNs/FCM configuration, RevenueCat/store products and signed release builds. Simulator/tests do not verify store billing, real health sharing, physical push delivery or store approval. Replace policy URLs and complete staging, backup/recovery, privacy/legal and medical-content review before release. Optional same-VPS landing hosting uses the shared Caddy overlay described in BACKEND_VPS.md, avoiding a second listener on ports 80/443.

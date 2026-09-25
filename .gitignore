@@ -60,3 +60,10 @@ android/key.properties
 **/google-services.json
 ios/Flutter/Firebase.generated.xcconfig
 supabase/.temp/
+backend/node_modules/
+backend/lib/
+backend/data/
+backend/secrets/
+backend/*.log
+.firebase/
+firebase/*-debug.log

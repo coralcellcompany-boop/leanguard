@@ -1,19 +1,19 @@
 import 'dart:async';
 import 'dart:convert';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:crypto/crypto.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
+import '../data/api_repository.dart';
 
 /// FCM/APNs carries generic reminder copy only. Tokens are scoped to Firebase
 /// Auth UIDs and are deleted from the device before another account may use it.
 class PushService {
-  PushService(this.auth, this.firestore, {FirebaseMessaging? messaging})
+  PushService(this.auth, this.remote, {FirebaseMessaging? messaging})
     : _messaging = messaging;
   final FirebaseAuth auth;
-  final FirebaseFirestore firestore;
+  final ApiRepositoryRemote remote;
   final FirebaseMessaging? _messaging;
   FirebaseMessaging get messaging => _messaging ?? FirebaseMessaging.instance;
   StreamSubscription<String>? _tokenSubscription;
@@ -48,6 +48,7 @@ class PushService {
             defaultTargetPlatform != TargetPlatform.android)) {
       return false;
     }
+    remote.baseUri;
     final userId = auth.currentUser?.uid;
     if (userId == null) return false;
     if (_ownerId != userId) _pendingRoute = null;
@@ -115,35 +116,14 @@ class PushService {
       return;
     }
     final oldToken = _token;
-    final id = tokenDocumentId(token);
-    final reference = firestore
-        .collection('users')
-        .doc(userId)
-        .collection('device_tokens')
-        .doc(id);
-    await firestore.runTransaction((transaction) async {
-      final existing = await transaction.get(reference);
-      final now = DateTime.now().toUtc().toIso8601String();
-      transaction.set(reference, {
-        'id': id,
-        'user_id': userId,
-        'created_at': existing.data()?['created_at'] ?? now,
-        'token': token,
-        'platform': defaultTargetPlatform == TargetPlatform.iOS
-            ? 'ios'
-            : 'android',
-        'updated_at': now,
-      });
-    });
+    await remote.registerDeviceToken(
+      token,
+      defaultTargetPlatform == TargetPlatform.iOS ? 'ios' : 'android',
+    );
     if (generation != _generation || auth.currentUser?.uid != userId) return;
     _token = token;
     if (oldToken != null && oldToken != token) {
-      await firestore
-          .collection('users')
-          .doc(userId)
-          .collection('device_tokens')
-          .doc(tokenDocumentId(oldToken))
-          .delete();
+      await remote.deleteDeviceToken(tokenDocumentId(oldToken));
     }
   }
 
@@ -160,15 +140,12 @@ class PushService {
     _token = null;
     try {
       if (owner != null && token != null) {
-        await firestore
-            .collection('users')
-            .doc(owner)
-            .collection('device_tokens')
-            .doc(tokenDocumentId(token))
-            .delete();
+        if (auth.currentUser?.uid == owner) {
+          await remote.deleteDeviceToken(tokenDocumentId(token));
+        }
       }
     } finally {
-      // Offline Firestore cleanup still revokes this installation's FCM token.
+      // Offline API cleanup still revokes this installation's FCM token.
       if (Firebase.apps.isNotEmpty) {
         await messaging.setAutoInitEnabled(false);
         await messaging.deleteToken();

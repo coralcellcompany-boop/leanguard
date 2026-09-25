@@ -1,6 +1,6 @@
 # LeanGuard backend
 
-> **Legacy Supabase reference.** The user selected Firebase after this implementation. The active runtime, deployment steps, endpoint contracts, Firestore/Storage rules and emulator tests are documented in [FIREBASE_SETUP.md](FIREBASE_SETUP.md). Do not deploy this Supabase stack for the current mobile application. The files remain as a migration/schema reference.
+> **Legacy Supabase reference.** The current runtime uses a Linux VPS, Docker and PostgreSQL, retaining Firebase Authentication and FCM only. See [BACKEND_VPS.md](BACKEND_VPS.md) and [POSTGRES_SCHEMA.md](POSTGRES_SCHEMA.md). Do not deploy this Supabase stack for the current mobile application. These files remain as a schema/migration reference.
 
 The database and Edge Functions are implemented under `supabase/`. The client uses native Supabase Auth and user-scoped PostgREST reads/writes. OpenAI, RevenueCat secret keys and the Firebase service account never enter the app. The only entitlement is `pro`; the Supabase mirror is written only after RevenueCat verification.
 

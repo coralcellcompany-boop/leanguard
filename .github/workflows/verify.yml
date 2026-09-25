@@ -20,28 +20,52 @@ jobs:
       - run: flutter analyze
       - run: flutter test
       - run: flutter build apk --debug
-  firebase:
+  backend:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: leanguard_test
+          POSTGRES_PASSWORD: isolated-ci-owner-password
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres -d leanguard_test"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      # Ephemeral CI-only credentials; never production secrets.
+      MIGRATION_DATABASE_URL: postgresql://postgres:isolated-ci-owner-password@127.0.0.1:5432/leanguard_test
+      DATABASE_RUNTIME_PASSWORD: isolated-ci-runtime-password-123456
+      TEST_DATABASE_URL: postgresql://leanguard_runtime:isolated-ci-runtime-password-123456@127.0.0.1:5432/leanguard_test
+      TEST_ADMIN_DATABASE_URL: postgresql://postgres:isolated-ci-owner-password@127.0.0.1:5432/leanguard_test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: npm
-          cache-dependency-path: firebase/functions/package-lock.json
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '21'
-      - uses: actions/cache@v4
-        with:
-          path: ~/.cache/firebase/emulators
-          key: firebase-emulators-${{ runner.os }}-${{ hashFiles('firebase/functions/package-lock.json') }}
-      - run: npm ci --prefix firebase/functions
-      - name: Build functions and run policy/provider tests
-        run: npm --prefix firebase/functions test
-      - name: Verify Firestore and Storage Rules with isolated emulators
-        run: npm --prefix firebase/functions run test:emulator
-      - name: Verify authenticated HTTPS functions with isolated emulators
-        run: npm --prefix firebase/functions run test:http
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci --prefix backend --ignore-scripts
+      - name: Apply PostgreSQL schema and create restricted runtime login
+        run: |
+          npm --prefix backend run migrate
+          npm --prefix backend run provision:runtime
+      - name: Compile and test policies, HTTP boundaries and exports
+        run: npm --prefix backend test
+      - name: Test actual PostgreSQL RLS, constraints and concurrent transactions
+        run: npm --prefix backend run test:database
+      - name: Test real HTTP with Firebase Auth emulator and PostgreSQL
+        run: npm --prefix backend run test:http
+      - name: Audit production dependencies
+        run: npm --prefix backend audit --omit=dev --audit-level=high
+      - name: Build non-root deployment images and validate Compose
+        run: |
+          docker build -t leanguard-api:verification backend
+          docker build -t leanguard-caddy:verification -f backend/deploy/Caddy.Dockerfile backend/deploy
+          docker compose --project-directory backend --env-file backend/.env.example config --quiet
+          docker compose --project-directory backend --env-file backend/.env.example -f backend/compose.yml -f backend/compose.landing.yml config --quiet
+      - name: Validate Caddy sites and redact signed URLs from real proxy errors
+        run: node backend/scripts/caddy-log-smoke.mjs
+      - name: Smoke-test hardened API container against isolated PostgreSQL
+        run: node backend/scripts/docker-smoke.mjs

@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
-import 'package:leanguard/core/data/firebase_repository.dart';
+import 'package:leanguard/core/data/api_repository.dart';
 import 'package:leanguard/core/services/firebase_auth_service.dart';
 import 'package:leanguard/core/state.dart';
 import 'package:leanguard/features/support/presentation/support_screens.dart';

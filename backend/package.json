@@ -1,0 +1,37 @@
+{
+  "name": "leanguard-api",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "main": "lib/index.js",
+  "engines": {
+    "node": ">=22 <25"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node lib/index.js",
+    "test": "npm run build && node --test test/policy.test.mjs test/export-files.test.mjs test/job-loop.test.mjs test/validation.test.mjs test/api.test.mjs test/config.test.mjs",
+    "test:database": "npm run build && node --test test/database.test.mjs",
+    "migrate": "node scripts/migrate.mjs",
+    "start:worker": "node lib/worker.js",
+    "provision:runtime": "node scripts/provision-runtime.mjs",
+    "import:records": "node scripts/import-records.mjs",
+    "test:http": "npm run build && node scripts/run-http-tests.mjs"
+  },
+  "dependencies": {
+    "express": "5.1.0",
+    "firebase-admin": "14.4.0",
+    "pg": "8.16.3"
+  },
+  "overrides": {
+    "gaxios": {
+      "uuid": "11.1.1"
+    }
+  },
+  "devDependencies": {
+    "@types/express": "5.0.3",
+    "@types/node": "22.15.30",
+    "@types/pg": "8.15.5",
+    "typescript": "5.8.3"
+  }
+}

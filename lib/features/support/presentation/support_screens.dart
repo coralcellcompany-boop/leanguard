@@ -5,7 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
-import '../../../core/data/firebase_repository.dart';
+import '../../../core/data/api_repository.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../../core/config.dart';
 import '../../../core/state.dart';

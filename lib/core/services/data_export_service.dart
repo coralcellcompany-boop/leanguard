@@ -10,8 +10,8 @@ import 'package:share_plus/share_plus.dart';
 import '../config.dart';
 import '../data/repository.dart';
 
-/// Export is an explicit user action. Firebase ID/App Check authenticate the
-/// function; the short-lived Storage URL authenticates its own download. Never
+/// Export is an explicit user action. Firebase Auth authenticates the
+/// Node API; the short-lived signed URL authenticates its own download. Never
 /// forward Firebase credentials to that URL or expose it in the shared file.
 class DataExportService {
   DataExportService(
@@ -19,7 +19,7 @@ class DataExportService {
     http.Client Function()? httpClientFactory,
     Future<Directory> Function()? temporaryDirectory,
     Future<ShareResult> Function(ShareParams)? share,
-    this.storageBucket = AppConfig.firebaseStorageBucket,
+    this.backendBaseUrl = AppConfig.backendBaseUrl,
     this.downloadTimeout = const Duration(seconds: 300),
   }) : _httpClientFactory = httpClientFactory ?? http.Client.new,
        _temporaryDirectory = temporaryDirectory ?? getTemporaryDirectory,
@@ -29,7 +29,7 @@ class DataExportService {
   final http.Client Function() _httpClientFactory;
   final Future<Directory> Function() _temporaryDirectory;
   final Future<ShareResult> Function(ShareParams) _share;
-  final String storageBucket;
+  final String backendBaseUrl;
   final Duration downloadTimeout;
 
   String _requireOwner() {
@@ -68,23 +68,28 @@ class DataExportService {
   }
 
   Uri _downloadUri(Object? value, String owner) {
+    final origin = AppConfig.parseBackendUri(backendBaseUrl);
     final uri = value is String ? Uri.tryParse(value) : null;
     final segments = uri?.pathSegments ?? const <String>[];
+    final expiry = int.tryParse(uri?.queryParameters['expires'] ?? '');
+    final signature = uri?.queryParameters['signature'] ?? '';
     if (uri == null ||
         uri.scheme != 'https' ||
-        uri.host != 'storage.googleapis.com' ||
-        uri.port != 443 ||
+        uri.origin != origin.origin ||
         uri.userInfo.isNotEmpty ||
-        uri.fragment.isNotEmpty ||
-        storageBucket.isEmpty ||
-        segments.length < 4 ||
-        segments[0] != storageBucket ||
+        uri.hasFragment ||
+        segments.length != 4 ||
+        segments[0] != 'v1' ||
         segments[1] != 'exports' ||
         segments[2] != owner ||
-        ![
-          'Signature',
-          'X-Goog-Signature',
-        ].any((key) => uri.queryParameters[key]?.isNotEmpty ?? false)) {
+        !RegExp(
+          r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\.json$',
+        ).hasMatch(segments[3]) ||
+        expiry == null ||
+        expiry <= DateTime.now().millisecondsSinceEpoch ||
+        !RegExp(r'^[a-fA-F0-9]{64}$').hasMatch(signature) ||
+        uri.queryParametersAll.length != 2 ||
+        uri.queryParametersAll.values.any((values) => values.length != 1)) {
       throw StateError('The export download could not be verified. Try again.');
     }
     return uri;

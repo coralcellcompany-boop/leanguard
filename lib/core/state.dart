@@ -2,9 +2,8 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:purchases_flutter/purchases_flutter.dart';
 import 'package:firebase_auth/firebase_auth.dart' as firebase;
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'services/firebase_auth_service.dart';
-import 'data/firebase_repository.dart';
+import 'data/api_repository.dart';
 import 'package:uuid/uuid.dart';
 import 'config.dart';
 import 'data/repository.dart';
@@ -19,12 +18,11 @@ import 'services/background_health_service.dart';
 import 'services/report_service.dart';
 import '../features/plan/domain/plan_builder.dart';
 
-final repositoryProvider = Provider<LeanRepository>(
-  (ref) => LeanRepository(
-    store: const SecureLocalStore(),
-    remote: AppConfig.configured ? FirebaseRepositoryRemote() : null,
-  ),
-);
+final repositoryProvider = Provider<LeanRepository>((ref) {
+  final remote = AppConfig.configured ? ApiRepositoryRemote() : null;
+  if (remote != null) ref.onDispose(remote.dispose);
+  return LeanRepository(store: const SecureLocalStore(), remote: remote);
+});
 final authServiceProvider = Provider<FirebaseAuthService?>(
   (ref) => AppConfig.configured
       ? FirebaseAuthService(firebase.FirebaseAuth.instance)
@@ -340,6 +338,8 @@ class AppController extends StateNotifier<AppState> {
   StreamSubscription<SubscriptionStatus>? _subscription;
   Future<void>? _syncing;
   static const _uuid = Uuid();
+  static const _starterDescription =
+      'A starter 3-day plan. Start with a comfortable load and controlled repetitions.';
   String id() => _uuid.v4();
   Json row(Json data) => {
     'user_id': repository.userId,
@@ -370,9 +370,7 @@ class AppController extends StateNotifier<AppState> {
     }
     if (error is FormatException) return error.message;
     if (error is StateError) return error.message;
-    if (error is BackendException && error.status == 429) {
-      return 'Your coaching allowance is used. Your logs remain available.';
-    }
+    if (error is BackendException) return error.message;
     return 'We could not complete that request. Check your connection and try again.';
   }
 
@@ -556,7 +554,10 @@ class AppController extends StateNotifier<AppState> {
         state = state.copy(
           offline: true,
           error:
-              'Saved on this device. Sync is unavailable; tap Retry when connected.',
+              e is FormatException ||
+                  (e is StateError && e.message.contains('BACKEND_BASE_URL'))
+              ? _safeError(e)
+              : 'Saved on this device. Sync is unavailable; tap Retry when connected.',
         );
       }
     } finally {
@@ -825,8 +826,7 @@ class AppController extends StateNotifier<AppState> {
         'strength_plans',
         row({
           'name': 'Muscle retention foundation',
-          'description':
-              'A starter 3-day plan. Start with a comfortable load and controlled repetitions.',
+          'description': _starterDescription,
           'is_active': true,
           'version': 1,
           'source': 'starter',
@@ -1324,7 +1324,7 @@ class AppController extends StateNotifier<AppState> {
     }
     if (enabled && kind == 'walking' && !await enableRemoteReminders()) {
       throw StateError(
-        'Smart reminders need push notifications. Check permission and Firebase setup.',
+        'Smart reminders need push notifications. Check permission and server setup.',
       );
     }
     await _put('reminder_preferences', {
@@ -1681,7 +1681,7 @@ class AppController extends StateNotifier<AppState> {
 
   Future<bool> enableRemoteReminders() async {
     if (state.demo || auth?.currentUser == null) return false;
-    _push ??= PushService(auth!.auth, FirebaseFirestore.instance);
+    _push ??= PushService(auth!.auth, ApiRepositoryRemote(auth: auth!.auth));
     final granted = await _push!.enable(onTap: onNotificationTap);
     if (granted) await recordConsent('notifications', true);
     return granted;
@@ -1889,11 +1889,19 @@ class AppController extends StateNotifier<AppState> {
       'name': personalized
           ? 'Your muscle retention plan'
           : 'Muscle retention foundation',
+      'description': personalized ? plan['description'] : _starterDescription,
       'source': personalized ? 'manual' : 'starter',
       'version': (plan['version'] as int) + 1,
-      'schedule': List<int>.from(
-        state.goalProfile['training_days'] ?? [1, 4, 6],
-      ).map((d) => {'day': d}).toList(),
+      // Retain saved Pro preferences in the profile, but a Free rebuild must
+      // publish the starter template accepted by the server after expiration.
+      'schedule':
+          (personalized
+                  ? List<int>.from(
+                      state.goalProfile['training_days'] ?? [1, 4, 6],
+                    )
+                  : const [1, 4, 6])
+              .map((d) => {'day': d})
+              .toList(),
     });
     await _ensurePlannedWorkouts();
   }

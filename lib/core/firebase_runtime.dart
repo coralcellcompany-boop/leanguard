@@ -1,8 +1,5 @@
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_app_check/firebase_app_check.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
 import 'config.dart';
 
@@ -34,30 +31,8 @@ abstract final class FirebaseRuntime {
       await Firebase.initializeApp(options: expected);
     }
     validateNativeOptions(expected, Firebase.app().options);
-    // Health data has one explicitly encrypted offline cache. Disable the
-    // Firestore SDK's disk cache and require server reads in the repository.
-    FirebaseFirestore.instance.settings = const Settings(
-      persistenceEnabled: false,
-    );
     if (AppConfig.useEmulators) {
       await FirebaseAuth.instance.useAuthEmulator(AppConfig.emulatorHost, 9099);
-      FirebaseFirestore.instance.useFirestoreEmulator(
-        AppConfig.emulatorHost,
-        8080,
-      );
-      await FirebaseStorage.instance.useStorageEmulator(
-        AppConfig.emulatorHost,
-        9199,
-      );
-    } else {
-      await FirebaseAppCheck.instance.activate(
-        providerAndroid: kDebugMode
-            ? const AndroidDebugProvider()
-            : const AndroidPlayIntegrityProvider(),
-        providerApple: kDebugMode
-            ? const AppleDebugProvider()
-            : const AppleAppAttestWithDeviceCheckFallbackProvider(),
-      );
     }
     _ready = true;
   }

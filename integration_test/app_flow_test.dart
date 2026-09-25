@@ -1,3 +1,7 @@
+import 'dart:convert';
+import 'dart:io';
+import 'package:firebase_auth/firebase_auth.dart' as firebase;
+import 'package:leanguard/core/data/api_repository.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -5,6 +9,20 @@ import 'package:integration_test/integration_test.dart';
 import 'package:leanguard/app.dart';
 import 'package:leanguard/core/data/repository.dart';
 import 'package:leanguard/core/state.dart';
+
+class NativeApiTestUser extends Fake implements firebase.User {
+  NativeApiTestUser(this.uid);
+  @override
+  final String uid;
+  @override
+  Future<String?> getIdToken([bool forceRefresh = false]) async =>
+      'native-loopback-test-token';
+}
+
+class NativeApiTestAuth extends Fake implements firebase.FirebaseAuth {
+  @override
+  firebase.User? currentUser = NativeApiTestUser('native-api-test');
+}
 
 /// Native navigation, validation and persistence acceptance without credentials.
 /// Real store checkout, OAuth and health APIs have separate sandbox/device checks.
@@ -132,6 +150,69 @@ void main() {
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
       container.dispose();
+    },
+  );
+  testWidgets(
+    'native API sockets preserve authentication, records and account boundaries',
+    (tester) async {
+      await tester.runAsync(() async {
+        // This fixture binds only the simulator's own loopback interface. It
+        // verifies native HTTP transport without contacting a live user backend.
+        final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+        final auth = NativeApiTestAuth();
+        var switchOwner = false;
+        var requests = 0;
+        final listener = server.listen((request) async {
+          requests++;
+          expect(
+            request.headers.value(HttpHeaders.authorizationHeader),
+            'Bearer native-loopback-test-token',
+          );
+          expect(request.uri.path, '/v1/records/weight_entries');
+          expect(request.uri.queryParameters, {'offset': '0', 'limit': '100'});
+          if (switchOwner) {
+            auth.currentUser = NativeApiTestUser('another-account');
+          }
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(
+            jsonEncode({
+              'records': [
+                {
+                  'id': 'native-weight',
+                  'user_id': 'native-api-test',
+                  'weight_kg': 82.3,
+                },
+              ],
+            }),
+          );
+          await request.response.close();
+        });
+        final remote = ApiRepositoryRemote(
+          auth: auth,
+          baseUrl: 'http://127.0.0.1:${server.port}',
+          allowLocalHttp: true,
+          releaseMode: false,
+        );
+        try {
+          final rows = await remote.readPage(
+            'weight_entries',
+            'native-api-test',
+            0,
+            100,
+          );
+          expect(rows.single['weight_kg'], 82.3);
+          switchOwner = true;
+          await expectLater(
+            remote.readPage('weight_entries', 'native-api-test', 0, 100),
+            throwsStateError,
+          );
+          expect(requests, 2);
+        } finally {
+          remote.dispose();
+          await server.close(force: true);
+          await listener.cancel();
+        }
+      });
     },
   );
 }

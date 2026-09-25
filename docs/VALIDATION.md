@@ -1,60 +1,52 @@
 # Validation and release status
 
-The active backend targets Firebase project **`leanguard-a58ff`**, Functions region **`europe-west1`**, and a Firestore database in that European region. Public project/app configuration, emulator verification, service deployment and live-vendor acceptance are separate milestones. Use [FIREBASE_SETUP.md](FIREBASE_SETUP.md) for provisioning/deployment and [MOBILE_SETUP.md](MOBILE_SETUP.md) for platform setup.
+The active architecture is **Flutter → a self-hosted Node.js API → PostgreSQL**. Firebase project `leanguard-a58ff` provides **Authentication and FCM only**. Firebase Functions, Firestore, Storage and App Check are not required by the active mobile/backend runtime. Both native identifiers are `com.coralcell.leanguard`.
 
-## Confirmed hosted setup
+Use [BACKEND_VPS.md](BACKEND_VPS.md) for Docker deployment, [POSTGRES_SCHEMA.md](POSTGRES_SCHEMA.md) for ownership/migration details, and [MOBILE_SETUP.md](MOBILE_SETUP.md) for native setup. Choose an EU VPS and backup destination to retain the user's European data-location preference; third-party processing regions require separate review.
 
-Observed on **2026-09-18** in `leanguard-a58ff`:
+## Executed checks — 2026-09-25
 
-- Enabled the Firestore API and created the default Native/Standard Firestore database in **`europe-west1`**. The reviewed Firestore Security Rules and indexes deployed successfully.
-- Enabled Firebase email/password authentication with an enforced minimum password length of 12 characters and email enumeration protection. No live test accounts or verification emails were created during these setup checks.
-- Registered the iOS and Android apps as **`com.coralcell.leanguard`** and refreshed matching native SDK files and Dart client configuration. Configured Android debug and iOS simulator rebuilds both passed. The APK package, iOS bundle identifier and embedded Firebase app/project identifiers were checked against the private Dart configuration. This does not validate Google/Apple sign-in or store purchases.
-- At this checkpoint, billing remained disabled, no Storage bucket or Functions deployment existed, and Google/Apple authentication providers were not configured. RevenueCat/store products, server provider secrets, App Check and physical-device acceptance remain separate requirements below.
+- **237 Flutter unit/widget tests passed; final full analyzer clean.** Coverage includes account isolation, encrypted offline replay, onboarding, workout logging, permission denial, entitlement gates, restoration, AI failures and owner-safe API/export handling. Three final regressions cover canonical Free-plan rebuilds after Pro expiry while preserving saved preferences/history. Focused runs overlap this total.
+- **Two native iOS integration tests passed.** The app flow uses isolated preview records with the real router/controller and a temporary native Keychain round trip. The second uses a real loopback HTTP server to check Firebase bearer-token transport, JSON records and an account switch during an outstanding request. Neither contacts a live OpenAI/store/production backend. These native integration checks preceded the final downgrade-only change, which has separate regression tests.
+- **Configured Android debug and iOS simulator builds passed after the final downgrade fix.** Package/bundle IDs and embedded Firebase configuration match. A final clean iOS rebuild restored `lib/main.dart` after the integration harness replaced generated artifacts. Removed Firebase service frameworks are absent; Auth's required AppCheckInterop shim is not the App Check SDK. These are development artifacts, not signed store releases.
+- **38 Node policy/API/validation/export/worker/configuration tests passed** after the final review fixes and TypeScript compilation. Tests include malformed requests, ownership fields, protected records, safety, quotas, signed export links, concurrency, scheduler overlap prevention and startup configuration validation.
+- **22 PostgreSQL integration tests passed** against actual disposable PostgreSQL 17: migrations, restricted roles, RLS, cross-owner references, rollback/retry, record imports, server-owned records and cross-instance lifecycle locking without starving database query connections.
+- **10 authenticated HTTP integration tests passed** with actual Express/PostgreSQL and isolated Firebase Auth emulator tokens. They cover concurrent Free starter-plan enforcement, protected records, cross-owner isolation, exports and account deletion. Deletion verifies lock contention/retry, actual private-file/SQL removal and emulator Auth deletion; only the RevenueCat response is mocked. No paid provider is called.
+- API and non-root Caddy Docker images built successfully; base Compose, optional landing overlay and both Caddy configurations validated. The final hardened API-container smoke test passed readiness, missing-authentication and UID 10001/read-only-root checks. A real Caddy 502 regression also passed: error metadata remains useful while signed export URLs, identity fields and request headers are removed from runtime logs.
+- `npm audit --omit=dev` reported **zero production dependency vulnerabilities** at this checkpoint.
+- Landing-page links/assets, image descriptions, unique IDs and JavaScript syntax were validated. Exact committed source was packaged and deployed as an owner-private [Sites page](https://leanguard-coralcell.mhamoudabaplus.chatgpt.site). No browser rendering audit was performed in this turn.
 
-This confirms the stated Firestore and password-auth configuration only. It does not establish working paid subscriptions, AI requests, native provider sign-in, health sharing or push delivery.
+Earlier Supabase and Firebase Functions emulator results are historical only; they do not establish behavior of the Node backend. No VPS or live vendor deployment was performed.
 
-## Executed implementation checks
+## Reproduce checks
 
-The final full Flutter suite completed **215 tests**, and `flutter analyze` reported **no issues**. Individual focused counts below overlap with that suite and must not be summed.
-
-- Inspected all 14 primary prototype screens in source, recreated them as native Flutter widgets, rendered them to PNG and reviewed their UI. Reports, GLP-1 routine support, training preferences and adaptive insights add four matching native screens. Captures and reproduction steps are described in [DESIGN_AUDIT.md](DESIGN_AUDIT.md).
-- Native widget suites cover standard/compact phone sizes, enlarged text, navigation, empty/denied states, logging validation, consent, paywall behavior and historical-data access. The primary/insight/domain regression run completed **67 tests**. Captures use fixture records; they do not imply real account activity.
-- Domain/repository/controller suites exercise all 20 entities, account-isolated encrypted-cache behavior, offline mutation retry, onboarding, workout persistence, conservative suggestions, safety fallbacks, Free/Pro gates and subscription restoration.
-- Added **nine Firebase repository helper tests** for document IDs, source-aware imported-weight hashes, nested timestamp normalization and HTTPS endpoint mapping. **Four reauthentication widget tests** verify that sensitive actions use the current account, reject incorrect credentials, prevent account creation from the verification form, and distinguish successful verification from cancellation. Together with the eight existing supporting-screen tests, the targeted run completed **21 tests**. The corresponding analyzer check passed.
-- The workout-health sharing regression run completed **22 tests**: ten export checks, three summary-screen checks and nine existing controller checks. It verifies exact summary-workout identity, persisted duplicate prevention, native write failure, denied permissions and account/entitlement changes during asynchronous work.
-- The final lifecycle run completed **10 tests**, including two added regressions: a late account-deletion response cannot sign out or erase a newly selected account; expiration cancels old schedules and retains at most three enabled fixed local reminders while disabling Pro quiet hours. Weight logs and all saved reminder preferences remain intact. The lifecycle test analyzer check passed.
-- The Firebase TypeScript build passed, followed by **14 policy/provider tests**, **20 Auth/Firestore/Storage emulator tests**, and **one actual Functions-emulator HTTP test**. Coverage includes concurrent quotas, consent revocation, trusted entitlements, reminders, health import safeguards, plan approval and authenticated requests. Emulator tests use `demo-leanguard` and placeholder secrets; no real OpenAI or store credentials are used. `npm audit --omit=dev` reported no production dependency vulnerabilities at this verification point.
-- **After the Firebase migration**, Android debug and iOS simulator builds succeeded. The native integration flow passed on an iPhone 17 Pro Max / iOS 26.2 simulator using the real router, controller and a temporary native Keychain round trip. It covers onboarding, manual permission fallback, invalid/valid weight input, protein, workout logging/skipping/completion, notification unavailability, unavailable preview checkout and serialized preview persistence. This flow uses isolated local records, not a connected production account. After migrating to `com.coralcell.leanguard`, both platforms were rebuilt successfully with `--dart-define-from-file=dart_defines.json`; artifact identifiers and embedded Firebase configuration match. The device integration run preceded this identifier-only migration. The Android artifact is `build/app/outputs/flutter-apk/app-debug.apk`; the iOS simulator artifact is `build/ios/iphonesimulator/Runner.app`. These are debug/simulator builds, not signed store releases.
-
-The earlier Supabase migrations/RLS and Edge Functions were also checked during the original implementation. They remain **legacy reference validation only** and do not establish Firebase behavior. Default CI now runs Flutter analysis/tests/Android debug build plus Firebase function compilation, policy tests, Security Rules emulator tests and Functions HTTP smoke tests.
-
-## Reproduce current checks
-
-Use Flutter 3.38.9, Node 22, Java 17 for Android builds, and Java 21 for the Firebase emulators. Firebase CLI is pinned in `firebase/functions/package-lock.json`; the scripts invoke that local version rather than an unrelated global CLI.
+Use Flutter 3.38.9 / Dart 3.10.8 and Node 22. Native builds require their platform SDKs. PostgreSQL tests require a disposable database whose name ends in `_test`, with roles/migrations provisioned as described in the backend guide.
 
 ```sh
 flutter pub get
 flutter analyze
 flutter test
-npm ci --prefix firebase/functions
-npm --prefix firebase/functions test
-npm --prefix firebase/functions run test:emulator
-npm --prefix firebase/functions run test:http
-flutter build apk --debug
-flutter build ios --simulator
+npm ci --prefix backend
+npm --prefix backend test
+# Set TEST_DATABASE_URL and TEST_ADMIN_DATABASE_URL privately first:
+npm --prefix backend run test:database
+npm --prefix backend run test:http
+python3 tool/package_server.py
+flutter build apk --debug --dart-define-from-file=dart_defines.json
+flutter build ios --simulator --dart-define-from-file=dart_defines.json
 flutter test integration_test/app_flow_test.dart -d <simulator-or-device-id>
 ```
 
-The Firebase runners select the isolated `demo-leanguard` project and strip unrelated credentials from the emulator environment. CI does not deploy services or use production credentials. Run native commands only on the appropriate configured host. Report the final aggregate test/build results for the exact revision being delivered; counts in individual verification runs are not additive across overlapping suites.
+The integration entrypoint can replace generated build products; rebuild `lib/main.dart` before distributing a normal development app. CI uses isolated demo authentication/test databases, not production credentials.
 
-## Connected-service and release acceptance
+## Hosted configuration and release acceptance
 
-1. Confirm project access, Blaze billing and enabled Firebase services. Verify the default Firestore database and Storage bucket locations, register `com.coralcell.leanguard` on both platforms, enable email/Google/Apple providers, configure OAuth fingerprints/return schemes and App Check, and deploy the reviewed Security Rules, indexes and Functions. Exercise owner isolation, token revocation, export and deletion with two disposable accounts against staging. Local emulator success does not verify this hosted configuration.
-2. Configure RevenueCat entitlement `pro`, offerings and both stores' products at **$19.99 monthly / $119.99 annually**, with an optional eligible **seven-day annual trial**. Add public platform SDK keys to the client and restricted server/webhook secrets to Secret Manager. Verify actual purchase, pending/canceled checkout, restoration, renewal, grace/billing issues, expiration and webhook reconciliation in both stores. Existing data must remain accessible after expiration.
-3. Set the server-only OpenAI secret and intended model parameters. Run live structured-output/safety evaluations, provider-refusal and timeout handling, and cost monitoring. The inexpensive normal-coaching model and stronger reasoning model are configuration choices; local mocked responses do not prove live model behavior. No provider API key belongs in Flutter.
-4. Verify HealthKit and Health Connect partial denial, separate read/write consent, duplicate avoidance, original sample timestamps, real sensor data and OS-scheduled background refresh on physical devices. Workout export tracks the exact completed workout and persists an exported marker after native success; simultaneous and repeated exports are guarded. Native Health and the local cache cannot share a transaction, so a crash after the native write but before the marker is saved can leave an unconfirmed export. No automatic workout-export retry is performed. OS background timing is best effort.
-5. Configure APNs and FCM for the registered apps, deploy the authenticated Cloud Scheduler trigger, and verify local/push permissions, timezone/quiet hours, token rotation and delivery on real devices. No public scheduler endpoint or client-held scheduler secret is required. Notification payloads must remain free of health values.
-6. Fill production privacy/terms/support URLs; review vendor retention and processing regions, store privacy declarations, Security Rules/App Check enforcement, accessibility with VoiceOver/TalkBack, and clinical wording. Selecting a European Functions/Firestore region alone does not establish every external provider's processing location.
-7. Supply signing identities, complete store agreements/health declarations and upload signed artifacts through the owner's Apple/Google accounts. Emulator tests, debug builds, public Firebase app registration and a source-code review do not certify store approval or production purchase/health/push flows.
+Earlier setup registered the native apps and enabled Firebase email/password authentication with a 12-character minimum and email-enumeration protection. Firestore/rules created in `europe-west1` on 2026-09-18 are legacy and have not been destroyed. Existing cloud records need a verified migration before retiring that database. No Functions/Storage deployment is needed for the new backend.
 
-Track actual hosted provisioning and deployment outcomes separately from these acceptance requirements. Do not describe credentials, paid products, Functions deployment or physical-device validation as complete without their corresponding live evidence.
+1. Supply VPS/API domains, configure TLS, mount server secrets, provision PostgreSQL roles, run migrations and start API/worker containers. Verify staging isolation, token revocation, export/deletion, backups and restoration. The repository has not been deployed to the user's VPS.
+2. Configure Firebase Apple/Google providers and native fingerprints/redirect schemes. Grant the server identity required Auth administration and FCM permissions. Test real sign-in/recovery/revocation; emulator results do not establish hosted-provider setup.
+3. Configure RevenueCat entitlement `pro`, offerings and store products at **$19.99/month / $119.99/year**, optionally with an eligible seven-day annual trial. Mount secret API/webhook keys on the VPS; set public SDK keys in Flutter. Verify purchase, restoration, cancellation, renewal, grace, billing issues and expiry in both store sandboxes. Existing data remains readable after expiry.
+4. Mount the OpenAI key on the server. Defaults are `gpt-4.1-mini` for ordinary coaching and `gpt-4.1` for complex plan reasoning, configurable server-side. Run live schema/safety/timeout/refusal evaluations and cost monitoring. Mocked transport tests do not prove live model behavior.
+5. Exercise HealthKit/Health Connect denial, revocation, timestamps, deduplication and background refresh on physical devices. Native health writes and local export markers cannot share a transaction; no automatic retry follows an unconfirmed workout export.
+6. Configure APNs/FCM and verify local/worker push on physical devices: timezone changes, quiet hours, token rotation and denied permissions. The private VPS worker has no public scheduler endpoint. OS delivery/background timing remains best effort.
+7. Supply approved privacy/terms/support pages, store disclosures and signing identities. Review accessibility and clinical wording. The landing page says “coming soon”; replace labels with genuine store links after release. Local tests and preview publication do not establish store approval or production vendor acceptance.

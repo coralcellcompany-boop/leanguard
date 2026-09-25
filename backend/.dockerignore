@@ -1,0 +1,10 @@
+node_modules
+lib
+test
+data
+secrets
+.env*
+*.log
+deploy
+compose.yml
+README*

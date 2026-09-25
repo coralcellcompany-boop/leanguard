@@ -1,0 +1,44 @@
+{
+  email {$ACME_EMAIL}
+  admin off
+  http_port 8080
+  https_port 8443
+  # Runtime proxy errors also include request metadata without an access logger.
+  # Keep operational error events, but omit identities and bearer export URLs.
+  log default {
+    level INFO
+    format filter {
+      wrap json
+      fields {
+        request delete
+        uri delete
+        url delete
+        headers delete
+        resp_headers delete
+        user_id delete
+        client_ip delete
+        remote_ip delete
+        remote_addr delete
+      }
+    }
+  }
+}
+
+# Optional extra sites are mounted by compose.landing.yml; one proxy owns 80/443.
+import /etc/caddy/sites/*.caddy
+
+{$API_DOMAIN} {
+  header {
+    Strict-Transport-Security "max-age=31536000"
+    X-Content-Type-Options "nosniff"
+    Referrer-Policy "no-referrer"
+    -Server
+  }
+  # No access logger: URLs can contain short-lived export signatures.
+  reverse_proxy api:8080 {
+    transport http {
+      dial_timeout 5s
+      response_header_timeout 330s
+    }
+  }
+}

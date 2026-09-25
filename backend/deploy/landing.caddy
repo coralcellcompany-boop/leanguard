@@ -1,0 +1,12 @@
+{$LANDING_DOMAIN} {
+  root * /srv/landing
+  encode zstd gzip
+  header {
+    Strict-Transport-Security "max-age=31536000"
+    X-Content-Type-Options "nosniff"
+    Referrer-Policy "strict-origin-when-cross-origin"
+    -Server
+  }
+  try_files {path} {path}/ /index.html
+  file_server
+}

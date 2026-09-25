@@ -4,12 +4,11 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:health/health.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:workmanager/workmanager.dart';
 import '../config.dart';
 import '../firebase_runtime.dart';
-import '../data/firebase_repository.dart';
+import '../data/api_repository.dart';
 import 'health_service.dart';
 
 const _taskName = 'com.coralcell.leanguard.health-sync';
@@ -27,7 +26,9 @@ void healthBackgroundDispatcher() {
     if (task != _taskName) return true;
     WidgetsFlutterBinding.ensureInitialized();
     try {
-      if (!AppConfig.configured) return true;
+      if (!AppConfig.configured || AppConfig.backendBaseUrl.isEmpty) {
+        return true;
+      }
       final raw = await _storage.read(key: _preferenceKey);
       if (raw == null) return true;
       final preference = jsonDecode(raw) as Map<String, dynamic>;
@@ -37,7 +38,15 @@ void healthBackgroundDispatcher() {
       final userId = auth.currentUser?.uid;
       if (userId == null || userId != preference['user_id']) return true;
       await auth.currentUser!.getIdToken();
-      return await BackgroundHealthSync(auth: auth).run(userId);
+      final remote = ApiRepositoryRemote(auth: auth);
+      try {
+        return await BackgroundHealthSync(
+          auth: auth,
+          remote: remote,
+        ).run(userId);
+      } finally {
+        remote.dispose();
+      }
     } catch (_) {
       // Network loss, protected data while locked and revoked system access
       // are recoverable on the next scheduled/foreground sync. No PHI logs.
@@ -63,6 +72,11 @@ class BackgroundHealthService {
   /// iOS schedules opportunistic refresh; it cannot guarantee an interval.
   Future<bool> enable({required String userId, required bool pro}) async {
     if (!supported || !pro || userId.isEmpty) return false;
+    AppConfig.parseBackendUri(
+      AppConfig.backendBaseUrl,
+      allowLocalHttp: AppConfig.allowLocalBackendHttp,
+      releaseMode: kReleaseMode,
+    );
     if (defaultTargetPlatform == TargetPlatform.android) {
       final health = Health();
       await health.configure();
@@ -145,40 +159,43 @@ class BackgroundSyncPolicy {
 class BackgroundHealthSync {
   BackgroundHealthSync({
     FirebaseAuth? auth,
-    FirebaseFirestore? firestore,
+    ApiRepositoryRemote? remote,
     HealthService? health,
-  }) : auth = auth ?? FirebaseAuth.instance,
-       firestore = firestore ?? FirebaseFirestore.instance,
+    Future<bool> Function(String)? isStillEnabled,
+  }) : _isStillEnabled = isStillEnabled,
+       auth = auth ?? FirebaseAuth.instance,
+       remote = remote ?? ApiRepositoryRemote(auth: auth),
        health = health ?? HealthService();
   final FirebaseAuth auth;
-  final FirebaseFirestore firestore;
+  final ApiRepositoryRemote remote;
   final HealthService health;
+  final Future<bool> Function(String)? _isStillEnabled;
 
   Future<bool> run(String userId) async {
     if (auth.currentUser?.uid != userId) return true;
     final provider = defaultTargetPlatform == TargetPlatform.iOS
         ? 'apple_health'
         : 'health_connect';
-    final user = firestore.collection('users').doc(userId);
-    const server = GetOptions(source: Source.server);
-    final entitlement = await user
-        .collection('subscription_entitlements')
-        .doc('pro')
-        .get(server);
-    final consents = await user
-        .collection('consent_records')
-        .where('kind', isEqualTo: 'health_data')
-        .orderBy('created_at', descending: true)
-        .limit(1)
-        .get(server);
-    final connection = await user
-        .collection('health_connections')
-        .doc(provider)
-        .get(server);
+    final results = await Future.wait([
+      remote.readAll('subscription_entitlements', userId),
+      remote.readAll('consent_records', userId),
+      remote.readAll('health_connections', userId),
+    ]);
+    final entitlement = results[0]
+        .where((row) => row['entitlement_id'] == 'pro' || row['id'] == 'pro')
+        .firstOrNull;
+    final consents =
+        results[1].where((row) => row['kind'] == 'health_data').toList()..sort(
+          (a, b) =>
+              (b['created_at'] as String).compareTo(a['created_at'] as String),
+        );
+    final connection = results[2]
+        .where((row) => row['provider'] == provider)
+        .firstOrNull;
     if (!BackgroundSyncPolicy.allows(
-      entitlement: entitlement.data(),
-      healthConsent: consents.docs.firstOrNull?.data()['granted'] == true,
-      connected: connection.data()?['status'] == 'connected',
+      entitlement: entitlement,
+      healthConsent: consents.firstOrNull?['granted'] == true,
+      connected: connection?['status'] == 'connected',
       now: DateTime.now().toUtc(),
     )) {
       return true;
@@ -196,29 +213,27 @@ class BackgroundHealthSync {
     }
     // The server rechecks consent, Pro, ownership and connection in its atomic
     // transaction, protects manually entered steps and deduplicates weight UUIDs.
-    await FirebaseRepositoryRemote(auth: auth, firestore: firestore).invoke(
-      'sync-health-activity',
-      {
-        'background': true,
-        'date': snapshot.date.toIso8601String().substring(0, 10),
-        'steps': snapshot.steps,
-        'active_energy': snapshot.activeEnergyKcal,
-        'source': provider,
-        if (snapshot.latestWeightKg != null &&
-            snapshot.weightExternalId != null &&
-            snapshot.weightRecordedAt != null)
-          'weight': {
-            'kg': snapshot.latestWeightKg,
-            'external_id': snapshot.weightExternalId,
-            'recorded_at': snapshot.weightRecordedAt!.toUtc().toIso8601String(),
-          },
-      },
-    );
+    await remote.invoke('sync-health-activity', {
+      'background': true,
+      'date': snapshot.date.toIso8601String().substring(0, 10),
+      'steps': snapshot.steps,
+      'active_energy': snapshot.activeEnergyKcal,
+      'source': provider,
+      if (snapshot.latestWeightKg != null &&
+          snapshot.weightExternalId != null &&
+          snapshot.weightRecordedAt != null)
+        'weight': {
+          'kg': snapshot.latestWeightKg,
+          'external_id': snapshot.weightExternalId,
+          'recorded_at': snapshot.weightRecordedAt!.toUtc().toIso8601String(),
+        },
+    });
     return true;
   }
 
   Future<bool> _stillEnabled(String userId) async {
     if (auth.currentUser?.uid != userId) return false;
+    if (_isStillEnabled != null) return _isStillEnabled(userId);
     final local = await _storage.read(key: _preferenceKey);
     if (local == null) return false;
     final preference = jsonDecode(local) as Map;
